@@ -1,9 +1,10 @@
 fastapi
 uvicorn
-pydantic
 langchain
 langchain-openai
+langchain-community
 langgraph
 neo4j
 faiss-cpu
 sentence-transformers
+pydantic<3,>=1.9.0
