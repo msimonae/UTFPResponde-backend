@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceInferenceAPI
 from langchain_community.graphs import Neo4jGraph
 from langchain.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -36,7 +36,7 @@ def startup_event():
     global vector_db, graph_db, agente_ppgi
     try:
         logging.info("Carregando FAISS e Neo4j...")
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        embeddings = HuggingFaceInferenceAPIEmbeddings(api_key=os.environ.get("HF_TOKEN"), model_name="sentence-transformers/all-MiniLM-L6-v2")
         # Atenção: O diretório 'faiss_index_ppgi' deve ser enviado para o servidor junto com o código
         vector_db = FAISS.load_local("faiss_index_ppgi", embeddings, allow_dangerous_deserialization=True)
         graph_db = Neo4jGraph(
