@@ -5,13 +5,12 @@ from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
 
-# Importações atualizadas para remover os Warnings (Avisos de Depreciação)
+# Importações atualizadas 
 from langchain_neo4j import Neo4jGraph
 from langchain_huggingface import HuggingFaceEndpointEmbeddings 
 
 from langchain.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
@@ -38,7 +37,6 @@ def startup_event():
     
     logging.info("⏳ Iniciando a carga do cérebro digital...")
 
-    # 1. Carregamento dos Embeddings via API (Atualizado para o novo pacote)
     try:
         embeddings = HuggingFaceEndpointEmbeddings(
             huggingfacehub_api_token=os.environ.get("HF_TOKEN"),
@@ -48,7 +46,6 @@ def startup_event():
         logging.error(f"Erro ao carregar Embeddings da HuggingFace: {e}")
         embeddings = None
 
-    # 2. Carregamento do FAISS
     if os.path.exists("faiss_index_ppgi") and embeddings:
         try:
             vector_db = FAISS.load_local("faiss_index_ppgi", embeddings, allow_dangerous_deserialization=True)
@@ -58,7 +55,6 @@ def startup_event():
     else:
         logging.warning("⚠️ Pasta 'faiss_index_ppgi' não encontrada no servidor.")
 
-    # 3. Conexão com Neo4j
     try:
         graph_db = Neo4jGraph(
             url=os.environ.get('NEO4J_URI'),
@@ -94,26 +90,14 @@ def startup_event():
         except Exception as e:
             return f"Erro na busca relacional: {e}"
 
-    system_prompt = (
-        "Você é o Agente Acadêmico Autônomo Oficial do PPGI-UTFPR. "
-        "Sua missão é ajudar discentes de mestrado.\n"
-        "REGRAS OBRIGATÓRIAS:\n"
-        "1. SEMPRE utilize a ferramenta 'search_vector_db' para ler os textos de ementas, bibliografias e resoluções.\n"
-        "2. Se a pergunta for ESPECIFICAMENTE sobre 'pré-requisitos' de disciplinas, use a ferramenta 'query_graph_db'.\n"
-        "3. Ao responder, seja claro e cite os documentos oficiais e resoluções encontrados."
-    )
-
     try:
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         
-        # SOLUÇÃO DO ERRO CRÍTICO: Trocamos 'state_modifier' por 'messages_modifier'
-        agente_ppgi = create_react_agent(
-            llm, 
-            [search_vector_db, query_graph_db], 
-            messages_modifier=system_prompt, 
-            checkpointer=memoria_agente
-        )
+        # SOLUÇÃO DO PROBLEMA (Idêntico ao pdm_v0 original): 
+        # Instanciamos o Agente sem o parâmetro "modifier" que dá erro nas versões.
+        agente_ppgi = create_react_agent(llm, [search_vector_db, query_graph_db], checkpointer=memoria_agente)
         logging.info("✅ Agente ReAct Autônomo inicializado com sucesso!")
+        
     except Exception as e:
         logging.error(f"Erro crítico ao compilar o Agente LangGraph: {e}")
 
@@ -127,13 +111,29 @@ async def chat_endpoint(request: QueryRequest):
     if not agente_ppgi:
         raise HTTPException(status_code=500, detail="Erro 500: O Agente não inicializou corretamente. Verifique os logs.")
     
+    # Injetamos o Prompt de Sistema dinamicamente junto com a pergunta do discente
+    system_prompt = (
+        "Você é o Agente Acadêmico Autônomo Oficial do PPGI-UTFPR. "
+        "Sua missão é ajudar discentes de mestrado.\n"
+        "REGRAS OBRIGATÓRIAS:\n"
+        "1. SEMPRE utilize a ferramenta 'search_vector_db' para ler os textos de ementas, bibliografias e resoluções.\n"
+        "2. Se a pergunta for ESPECIFICAMENTE sobre 'pré-requisitos' de disciplinas, use a ferramenta 'query_graph_db'.\n"
+        "3. Ao responder, seja claro e cite os documentos oficiais e resoluções encontrados."
+    )
+    
     try:
         config = {"configurable": {"thread_id": request.session_id}}
+        
+        # Chamada idêntica a do seu Colab original: passando 'system' e 'user'
         response = agente_ppgi.invoke(
-            {"messages": [HumanMessage(content=request.query)]},
+            {"messages": [
+                ("system", system_prompt),
+                ("user", request.query)
+            ]},
             config=config
         )
         answer = response['messages'][-1].content
         return QueryResponse(answer=answer)
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
