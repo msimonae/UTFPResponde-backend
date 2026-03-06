@@ -4,10 +4,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 
-# Correção 1: Nova importação do Neo4j
-from langchain_neo4j import Neo4jGraph 
+# Importações atualizadas para remover os Warnings (Avisos de Depreciação)
+from langchain_neo4j import Neo4jGraph
+from langchain_huggingface import HuggingFaceEndpointEmbeddings 
 
 from langchain.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -38,15 +38,17 @@ def startup_event():
     
     logging.info("⏳ Iniciando a carga do cérebro digital...")
 
+    # 1. Carregamento dos Embeddings via API (Atualizado para o novo pacote)
     try:
-        embeddings = HuggingFaceInferenceAPIEmbeddings(
-            api_key=os.environ.get("HF_TOKEN"),
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        embeddings = HuggingFaceEndpointEmbeddings(
+            huggingfacehub_api_token=os.environ.get("HF_TOKEN"),
+            model="sentence-transformers/all-MiniLM-L6-v2"
         )
     except Exception as e:
-        logging.error(f"Erro ao carregar Embeddings: {e}")
+        logging.error(f"Erro ao carregar Embeddings da HuggingFace: {e}")
         embeddings = None
 
+    # 2. Carregamento do FAISS
     if os.path.exists("faiss_index_ppgi") and embeddings:
         try:
             vector_db = FAISS.load_local("faiss_index_ppgi", embeddings, allow_dangerous_deserialization=True)
@@ -54,8 +56,9 @@ def startup_event():
         except Exception as e:
             logging.error(f"Erro ao carregar o índice FAISS: {e}")
     else:
-        logging.warning("⚠️ Pasta 'faiss_index_ppgi' não encontrada.")
+        logging.warning("⚠️ Pasta 'faiss_index_ppgi' não encontrada no servidor.")
 
+    # 3. Conexão com Neo4j
     try:
         graph_db = Neo4jGraph(
             url=os.environ.get('NEO4J_URI'),
@@ -102,13 +105,18 @@ def startup_event():
 
     try:
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        # O state_modifier agora funcionará pois travamos o langgraph na versão >=0.2.0 no requirements
-        agente_ppgi = create_react_agent(llm, [search_vector_db, query_graph_db], state_modifier=system_prompt, checkpointer=memoria_agente)
+        
+        # SOLUÇÃO DO ERRO CRÍTICO: Trocamos 'state_modifier' por 'messages_modifier'
+        agente_ppgi = create_react_agent(
+            llm, 
+            [search_vector_db, query_graph_db], 
+            messages_modifier=system_prompt, 
+            checkpointer=memoria_agente
+        )
         logging.info("✅ Agente ReAct Autônomo inicializado com sucesso!")
     except Exception as e:
         logging.error(f"Erro crítico ao compilar o Agente LangGraph: {e}")
 
-# Correção 2: Adicionada rota HEAD para o Health Check automático do Render
 @app.head("/")
 @app.get("/")
 async def root_endpoint():

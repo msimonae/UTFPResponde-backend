@@ -5,6 +5,7 @@ langchain
 langchain-openai
 langchain-community
 langchain-neo4j
-langgraph>=0.2.0
+langchain-huggingface
+langgraph
 faiss-cpu
 sentence-transformers
