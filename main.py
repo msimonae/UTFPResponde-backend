@@ -9,8 +9,9 @@ from langchain_community.graphs import Neo4jGraph
 from langchain.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.checkpoint.memory import MemorySaver # <-- Importação da Memória
 
-# Configuração de Observabilidade (LangSmith)
+# Observabilidade
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "UTFPResponde-Prod"
 
@@ -24,19 +25,17 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
 
-# Variáveis globais
 vector_db = None
 graph_db = None
 agente_ppgi = None
+memoria_agente = MemorySaver() # <-- Instancia a memória do Agente
 
 @app.on_event("startup")
 def startup_event():
-    """Carrega os bancos de dados de forma resiliente, inspirado no pdm_v0."""
     global vector_db, graph_db, agente_ppgi
     
     logging.info("⏳ Iniciando a carga do cérebro digital...")
 
-    # 1. Carregar Embeddings
     try:
         embeddings = HuggingFaceInferenceAPIEmbeddings(
             api_key=os.environ.get("HF_TOKEN"),
@@ -46,34 +45,27 @@ def startup_event():
         logging.error(f"Erro nos Embeddings: {e}")
         embeddings = None
 
-    # 2. Carregar FAISS (Try/Except isolado)
     if os.path.exists("faiss_index_ppgi") and embeddings:
         try:
             vector_db = FAISS.load_local("faiss_index_ppgi", embeddings, allow_dangerous_deserialization=True)
-            logging.info("✅ FAISS carregado com sucesso!")
         except Exception as e:
             logging.error(f"Erro ao carregar FAISS: {e}")
-    else:
-        logging.warning("⚠️ Pasta 'faiss_index_ppgi' ausente. RAG vetorial offline.")
 
-    # 3. Carregar Neo4j (Try/Except isolado)
     try:
         graph_db = Neo4jGraph(
             url=os.environ.get('NEO4J_URI'),
             username=os.environ.get('NEO4J_USERNAME'),
             password=os.environ.get('NEO4J_PASSWORD')
         )
-        graph_db.query("RETURN 1") # Testa a conexão
-        logging.info("✅ Neo4j carregado com sucesso!")
+        graph_db.query("RETURN 1")
     except Exception as e:
         logging.error(f"Erro ao conectar no Neo4j: {e}")
         graph_db = None
 
-    # 4. Ferramentas Resilientes (Exatamente como no pdm_v0)
     @tool
     def search_vector_db(query: str) -> str:
-        """Busca regras sobre Prazos, Regulamentos, Estágio e Créditos nas normativas."""
-        if not vector_db: return "Banco de dados vetorial offline no momento."
+        """Use esta ferramenta para buscar regras sobre Prazos, Regulamentos, Estágio e Créditos nas INs e Resoluções."""
+        if not vector_db: return "Banco de dados vetorial offline."
         try:
             docs = vector_db.similarity_search(query, k=3)
             return "\n---\n".join([d.page_content for d in docs])
@@ -82,40 +74,48 @@ def startup_event():
 
     @tool
     def query_graph_db(entidade: str) -> str:
-        """Verifica pré-requisitos entre disciplinas no Grafo."""
-        if not graph_db: return "Grafo de conhecimento offline no momento."
+        """Use esta ferramenta APENAS para verificar pré-requisitos entre disciplinas das ementas ou ligações lógicas estruturadas no Grafo."""
+        if not graph_db: return "Grafo offline."
         try:
-            cypher = f"MATCH (d:Disciplina)-[r:TEM_PRE_REQUISITO]->(pre) WHERE d.nome CONTAINS '{entidade}' OR d.sigla CONTAINS '{entidade}' RETURN d.nome, pre.nome"
+            # Query Cypher exata do seu Colab original
+            cypher = f"MATCH (d:Disciplina)-[r:TEM_PRE_REQUISITO]->(pre) WHERE d.nome CONTAINS '{entidade}' OR d.sigla CONTAINS '{entidade}' RETURN d.nome AS Disciplina, pre.nome AS Pre_Requisito"
             res = graph_db.query(cypher)
-            return str(res) if res else "Nenhuma relação encontrada."
+            return str(res) if res else "Nenhuma relação hierárquica encontrada no Grafo para esta disciplina."
         except Exception as e:
-            return f"Erro na busca relacional do grafo: {e}"
+            return f"Erro na busca relacional: {e}"
 
-    # 5. Criar o Agente (sem o state_modifier problemático)
     try:
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        agente_ppgi = create_react_agent(llm, [search_vector_db, query_graph_db])
-        logging.info("✅ Agente Autônomo inicializado e pronto!")
+        # Agente agora possui memória (checkpointer) para reter contexto!
+        agente_ppgi = create_react_agent(llm, [search_vector_db, query_graph_db], checkpointer=memoria_agente)
+        logging.info("✅ Agente Autônomo inicializado!")
     except Exception as e:
-        logging.error(f"Erro crítico ao instanciar o agente: {e}")
+        logging.error(f"Erro crítico no agente: {e}")
 
 @app.get("/")
 async def root_endpoint():
-    return {"status": "online", "message": "API do UTFPResponde rodando!"}
+    return {"status": "online"}
 
 @app.post("/chat", response_model=QueryResponse)
 async def chat_endpoint(request: QueryRequest):
     if not agente_ppgi:
-        raise HTTPException(status_code=500, detail="Ocorreu um erro crítico na inicialização. Verifique os logs do Render.")
+        raise HTTPException(status_code=500, detail="Agente não está pronto.")
     
     try:
-        # Injetando o Prompt de Sistema como Mensagem (Corrigido conforme o pdm_v0)
-        system_msg = SystemMessage(content="Você é o Agente Acadêmico Autônomo Oficial do PPGI-UTFPR. Responda baseando-se sempre nas ferramentas de banco de dados. Cite a origem.")
-        user_msg = HumanMessage(content=request.query)
+        # Prompt EXATO do Colab, restaurando a capacidade autônoma de decisão
+        system_prompt = (
+            "Você é o Agente Acadêmico Autônomo Oficial do PPGI-UTFPR. "
+            "Sua missão é ajudar discentes de mestrado. "
+            "SEMPRE utilize as ferramentas de busca (Vetor e Grafo) para basear sua resposta em documentos oficiais. "
+            "Se a pergunta envolver regras e também ementas, invoque ambas as ferramentas sequencialmente."
+        )
+        
+        # Thread_id garante que o agente lembre da conversa com este usuário específico
+        config = {"configurable": {"thread_id": request.session_id}}
         
         response = agente_ppgi.invoke(
-            {"messages": [system_msg, user_msg]},
-            config={"configurable": {"thread_id": request.session_id}}
+            {"messages": [SystemMessage(content=system_prompt), HumanMessage(content=request.query)]},
+            config=config
         )
         answer = response['messages'][-1].content
         return QueryResponse(answer=answer)
