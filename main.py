@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceInferenceAPI
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_community.graphs import Neo4jGraph
 from langchain.tools import tool
 from langgraph.prebuilt import create_react_agent
