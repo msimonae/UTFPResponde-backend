@@ -5,7 +5,6 @@ langchain
 langchain-openai
 langchain-community
 langchain-neo4j
-langchain-huggingface
-langgraph
-faiss-cpu
-sentence-transformers
+langgraph>=0.2.0
+scikit-learn
+pyarrow
