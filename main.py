@@ -114,7 +114,7 @@ def startup_event():
             llm_agente, 
             ferramentas, 
             checkpointer=memoria_agente,
-            state_modifier=system_message  # <--- A ÚNICA MUDANÇA
+            state_modifier=system_message  # <--- A ÚNICA MUDANÇA NO CÓDIGO
         )
 
         logging.info("✅ Agente V13 (SKLearn + Neo4j) pronto para inferência.")
