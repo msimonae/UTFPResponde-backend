@@ -5,19 +5,21 @@ WORKDIR /app
 # 1. Instalar dependências de sistema
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# 2. Copiar e instalar pacotes Python e o gdown
+# 2. Copiar e instalar pacotes Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gdown
 
-# 3. DOWNLOAD BLINDADO DO GOOGLE DRIVE (Atenção aos parâmetros de confirmação)
-# O confirm=t é o que garante que o Docker ignore o aviso de vírus e baixe os dados reais.
+# 3. CACHE BUSTING: Esta linha força a quebra do cache do Docker
+ENV FORCAR_ATUALIZACAO=v19.1
+
+# 4. DOWNLOAD BLINDADO DO GOOGLE DRIVE
 RUN gdown "https://drive.google.com/uc?export=download&confirm=t&id=1DXG70lEMgmSOLvTZ8_2895QLKP2Y6AWj" -O sklearn_index_ppgi.parquet
 
-# 4. Copiar o restante do código da API
+# 5. Copiar o restante do código da API
 COPY . .
 
-# 5. Expor a porta padrão do Cloud Run
+# 6. Expor a porta padrão do Cloud Run
 EXPOSE 8080
 
-# 6. Iniciar o servidor
+# 7. Iniciar o servidor
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
