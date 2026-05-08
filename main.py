@@ -11,7 +11,7 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 
-# Configuração de Observabilidade e Governança Institucional
+# Configuração de Observabilidade
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "UTFPResponde-Compliance-V19"
 
@@ -42,7 +42,6 @@ def startup_event():
 
     try:
         # --- 1. DOWNLOAD SEGURO DO GOOGLE CLOUD STORAGE ---
-        # Preenchido com o seu bucket: utfpresponde-vectordb-data
         BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "utfpresponde-vectordb-data")
         BLOB_NAME = "sklearn_index_ppgi.parquet"
         LOCAL_PATH = "/tmp/sklearn_index_ppgi.parquet"
@@ -77,7 +76,6 @@ def startup_event():
         @tool
         def hybrid_normative_search(pergunta: str) -> str:
             """Consulta regras e ementas acadêmicas no PPGI-UTFPR."""
-            # Expansão de consulta invisível para garantir Entity Recall no PPGI
             query_expandida = f"{pergunta} PPGI UTFPR"
             
             docs = vector_db.similarity_search(query_expandida, k=3)
@@ -88,7 +86,6 @@ def startup_event():
                 texto_base = d.page_content
                 fonte = d.metadata.get("source", "Documento PPGI")
 
-                # Consulta ao grafo para rastreabilidade de entidades (Traceability)
                 try:
                     relacoes = graph_db.query("""
                         MATCH (c:Chunk {id: $cid})-[:MENTIONS]->(e)
@@ -106,7 +103,7 @@ def startup_event():
         # --- 5. CONFIGURAÇÃO DO MODELO E PROMPT DE CONFORMIDADE ---
         llm_agente = ChatOpenAI(
             model="openai/gpt-4o-mini",
-            temperature=0, # Rigor total para evitar alucinações
+            temperature=0, 
             openai_api_base=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             openai_api_key=os.environ.get("OPENROUTER_API_KEY")
         )
@@ -121,11 +118,12 @@ def startup_event():
         )
 
         # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
+        # CORREÇÃO: Utilizando messages_modifier no lugar de state_modifier
         agente_ppgi = create_react_agent(
             llm_agente, 
             [hybrid_normative_search], 
             checkpointer=memoria_agente,
-            state_modifier=system_message
+            messages_modifier=system_message
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
@@ -136,12 +134,10 @@ def startup_event():
 @app.post("/chat", response_model=QueryResponse)
 async def chat_endpoint(request: QueryRequest):
     if not agente_ppgi:
-        raise HTTPException(status_code=500, detail="O motor de IA não pôde ser inicializado. Verifique as permissões do Bucket.")
+        raise HTTPException(status_code=500, detail="O motor de IA não pôde ser inicializado. Verifique os logs do Cloud Run.")
     
     try:
         config = {"configurable": {"thread_id": request.session_id}}
-        
-        # Injeção de Contexto Hardcoded para garantir o foco no programa PPGI
         prompt_expandido = f"{request.query} (Focar em: Programa do PPGI UTFPR)"
         
         response = agente_ppgi.invoke(
