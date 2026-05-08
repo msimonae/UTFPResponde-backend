@@ -9,10 +9,9 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gdown
 
-# 3. DOWNLOAD DO CÉREBRO DIGITAL (VETORIAL) VIA GOOGLE DRIVE
-# O ID extraído do seu link: 1DXG70lEMgmSOLvTZ8_2895QLKP2Y6AWj
-# O nome do arquivo deve ser exatamente 'sklearn_index_ppgi.parquet' para o main.py funcionar
-RUN gdown "https://drive.google.com/uc?id=1DXG70lEMgmSOLvTZ8_2895QLKP2Y6AWj" -O sklearn_index_ppgi.parquet
+# 3. DOWNLOAD BLINDADO DO GOOGLE DRIVE (Atenção aos parâmetros de confirmação)
+# O confirm=t é o que garante que o Docker ignore o aviso de vírus e baixe os dados reais.
+RUN gdown "https://drive.google.com/uc?export=download&confirm=t&id=1DXG70lEMgmSOLvTZ8_2895QLKP2Y6AWj" -O sklearn_index_ppgi.parquet
 
 # 4. Copiar o restante do código da API
 COPY . .
