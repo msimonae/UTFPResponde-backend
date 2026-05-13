@@ -1,3 +1,4 @@
+# Instalação das bibliotecas
 import os
 import logging
 from fastapi import FastAPI, HTTPException
