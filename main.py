@@ -123,7 +123,7 @@ def startup_event():
             model=llm_agente, 
             tools=[hybrid_normative_search], 
             checkpointer=memoria_agente,
-            state_modifier=system_message # Usando o padrão correto do LangGraph 0.2+
+            state_modifier=system_message 
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
