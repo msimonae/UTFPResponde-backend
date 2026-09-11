@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from google.cloud import storage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import SKLearnVectorStore
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
@@ -119,12 +119,11 @@ def startup_event():
         )
 
         # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
-        # Alterado de state_modifier para messages_modifier para compatibilidade com versões antigas do LangGraph
         agente_ppgi = create_react_agent(
-            llm_agente, 
-            [hybrid_normative_search], 
+            model=llm_agente, 
+            tools=[hybrid_normative_search], 
             checkpointer=memoria_agente,
-            messages_modifier=system_message
+            state_modifier=system_message # Usando o padrão correto do LangGraph 0.2+
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
