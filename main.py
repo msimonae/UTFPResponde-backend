@@ -1,4 +1,3 @@
-# Instalação das bibliotecas
 import os
 import logging
 from fastapi import FastAPI, HTTPException
@@ -10,7 +9,7 @@ from langchain_neo4j import Neo4jGraph
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 # Configuração de Observabilidade
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
@@ -34,6 +33,16 @@ vector_db = None
 graph_db = None
 agente_ppgi = None
 memoria_agente = MemorySaver()
+
+# Diretrizes movidas para o escopo global
+SYSTEM_PROMPT = (
+    "Você é o Assistente Virtual UTFPResponde. Especialista em normas do PPGI-UTFPR.\n\n"
+    "DIRETRIZES DE AUDITORIA:\n"
+    "1. RESPONDA APENAS com base nos dados recuperados pela ferramenta 'hybrid_normative_search'.\n"
+    "2. Se a informação não for encontrada nos dados, diga: 'Não localizei esta informação específica nas normas do PPGI'.\n"
+    "3. EXIBA SEMPRE a fonte da informação (Resolução, Portaria ou Documento).\n"
+    "4. Nunca utilize seu conhecimento geral para inventar regras ou prazos acadêmicos."
+)
 
 @app.on_event("startup")
 def startup_event():
@@ -101,7 +110,7 @@ def startup_event():
 
             return "\n\n---\n\n".join(contexto_agregado)
 
-        # --- 5. CONFIGURAÇÃO DO MODELO E PROMPT DE CONFORMIDADE ---
+        # --- 5. CONFIGURAÇÃO DO MODELO ---
         llm_agente = ChatOpenAI(
             model="openai/gpt-4o-mini",
             temperature=0, 
@@ -109,21 +118,12 @@ def startup_event():
             openai_api_key=os.environ.get("OPENROUTER_API_KEY")
         )
 
-        system_message = (
-            "Você é o Assistente Virtual UTFPResponde. Especialista em normas do PPGI-UTFPR.\n\n"
-            "DIRETRIZES DE AUDITORIA:\n"
-            "1. RESPONDA APENAS com base nos dados recuperados pela ferramenta 'hybrid_normative_search'.\n"
-            "2. Se a informação não for encontrada nos dados, diga: 'Não localizei esta informação específica nas normas do PPGI'.\n"
-            "3. EXIBA SEMPRE a fonte da informação (Resolução, Portaria ou Documento).\n"
-            "4. Nunca utilize seu conhecimento geral para inventar regras ou prazos acadêmicos."
-        )
-
         # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
+        # Removido o argumento de mensagem de sistema daqui para evitar erro de inicialização
         agente_ppgi = create_react_agent(
             model=llm_agente, 
             tools=[hybrid_normative_search], 
-            checkpointer=memoria_agente,
-            state_modifier=system_message 
+            checkpointer=memoria_agente
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
@@ -140,8 +140,12 @@ async def chat_endpoint(request: QueryRequest):
         config = {"configurable": {"thread_id": request.session_id}}
         prompt_expandido = f"{request.query} (Focar em: Programa do PPGI UTFPR)"
         
+        # Injetando as regras do sistema dinamicamente na invocação
         response = agente_ppgi.invoke(
-            {"messages": [HumanMessage(content=prompt_expandido)]},
+            {"messages": [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=prompt_expandido)
+            ]},
             config=config
         )
         
