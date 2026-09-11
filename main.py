@@ -124,8 +124,7 @@ def startup_event():
             llm_agente, 
             [hybrid_normative_search], 
             checkpointer=memoria_agente,
-            # messages_modifier=system_message
-            state_modifier=system_message
+            messages_modifier=system_message
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
