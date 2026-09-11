@@ -119,12 +119,13 @@ def startup_event():
         )
 
         # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
-        # CORREÇÃO: Utilizando messages_modifier no lugar de state_modifier
+        
         agente_ppgi = create_react_agent(
             llm_agente, 
             [hybrid_normative_search], 
             checkpointer=memoria_agente,
-            messages_modifier=system_message
+            # messages_modifier=system_message
+            state_modifier=system_message
         )
 
         logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
