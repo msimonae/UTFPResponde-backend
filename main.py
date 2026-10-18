@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 # Configuração de Observabilidade
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = "UTFPResponde-Compliance-V19"
+os.environ["LANGCHAIN_PROJECT"] = "UTFPResponde-Compliance-V23"
 
 app = FastAPI(
     title="API UTFPResponde", 
@@ -34,21 +34,24 @@ graph_db = None
 agente_ppgi = None
 memoria_agente = MemorySaver()
 
-# Diretrizes movidas para o escopo global
+# Diretrizes alinhadas com o Notebook V23 (Abstenção Segura e Rastreabilidade)
 SYSTEM_PROMPT = (
-    "Você é o Assistente Virtual UTFPResponde. Especialista em normas do PPGI-UTFPR.\n\n"
-    "DIRETRIZES DE AUDITORIA:\n"
-    "1. RESPONDA APENAS com base nos dados recuperados pela ferramenta 'hybrid_normative_search'.\n"
-    "2. Se a informação não for encontrada nos dados, diga: 'Não localizei esta informação específica nas normas do PPGI'.\n"
-    "3. EXIBA SEMPRE a fonte da informação (Resolução, Portaria ou Documento).\n"
-    "4. Nunca utilize seu conhecimento geral para inventar regras ou prazos acadêmicos."
+    "Você é o Assistente Virtual UTFPResponde, especializado EXCLUSIVAMENTE em normas acadêmicas e tutoriais operacionais do PPGI-UTFPR.\n\n"
+    "DIRETRIZES DE AUDITORIA E RIGOR INSTITUCIONAL:\n"
+    "1. ASSUNÇÃO DE CONTEXTO: Assuma que TODAS as perguntas são referentes ao PPGI da UTFPR.\n"
+    "2. USO OBRIGATÓRIO DA FERRAMENTA: Utilize SEMPRE a ferramenta 'hybrid_normative_search' para consultar a base híbrida antes de responder.\n"
+    "3. RESPOSTA BASEADA EM EVIDÊNCIAS E ABSTENÇÃO SEGURA: Use APENAS as informações recuperadas no contexto. "
+    "Se a pergunta tratar de assunto fora do escopo acadêmico ou se a informação não existir nos documentos recuperados, "
+    "inicie OBRIGATORIAMENTE sua resposta com a frase exata: 'Não encontrei informações específicas sobre essa questão nas normas vigentes do PPGI-UTFPR.' "
+    "e oriente o usuário a consultar diretamente a coordenação do programa.\n"
+    "4. TRACEABILITY (RASTREABILIDADE): Sempre que a resposta constar nos fragmentos recuperados, cite explicitamente o documento ou artigo de origem."
 )
 
 @app.on_event("startup")
 def startup_event():
     global vector_db, graph_db, agente_ppgi
     
-    logging.info("⏳ Iniciando o provisionamento da infraestrutura de IA do PPGI...")
+    logging.info("⏳ Iniciando o provisionamento da infraestrutura de IA do PPGI (Versão 23)...")
 
     try:
         # --- 1. DOWNLOAD SEGURO DO GOOGLE CLOUD STORAGE ---
@@ -82,13 +85,23 @@ def startup_event():
             password=os.environ.get("NEO4J_PASSWORD")
         )
 
-        # --- 4. DEFINIÇÃO DA FERRAMENTA DE BUSCA HÍBRIDA ---
+        # --- 4. DEFINIÇÃO DA FERRAMENTA DE BUSCA HÍBRIDA COM EXPANSÃO SEMÂNTICA ---
         @tool
         def hybrid_normative_search(pergunta: str) -> str:
-            """Consulta regras e ementas acadêmicas no PPGI-UTFPR."""
-            query_expandida = f"{pergunta} PPGI UTFPR"
+            """Ferramenta OBRIGATÓRIA para buscar regras, resoluções e tutoriais do PPGI-UTFPR."""
+            query_expandida = pergunta
+            p_low = pergunta.lower()
             
-            docs = vector_db.similarity_search(query_expandida, k=3)
+            # Expansão inteligente idêntica à Célula 4.5 do Notebook V23
+            if "cra" in p_low or "coeficiente de rendimento" in p_low:
+                query_expandida += " Coeficiente de Rendimento CR acumulado inferior a 7,0 sete segundo período letivo desligamento Art. 28 Art. 49"
+            if "inpi" in p_low or "agint" in p_low or "relatório técnico" in p_low or "consultoria" in p_low or "créditos especiais" in p_low:
+                query_expandida += " Resolução 008/2021 créditos especiais Art. 3º seis créditos Art. 4º dois créditos AGINT INPI setor produtivo"
+            if "membro interno" in p_low or ("insere" in p_low and "banca" in p_low) or "incluir servidor" in p_low:
+                query_expandida += " Portal do Aluno Solicitação Marcação da Defesa Qualificação Incluir Servidor da UTFPR Membros da Banca pertencentes à Instituição"
+
+            # Aumentado de k=3 para k=6 para garantir recall em questões complexas
+            docs = vector_db.similarity_search(query_expandida, k=6)
             contexto_agregado = []
 
             for d in docs:
@@ -100,7 +113,7 @@ def startup_event():
                     relacoes = graph_db.query("""
                         MATCH (c:Chunk {id: $cid})-[:MENTIONS]->(e)
                         OPTIONAL MATCH (e)-[r]-(related)
-                        RETURN e.id AS Entidade, type(r) AS Tipo, related.id AS Destino LIMIT 5
+                        RETURN e.id AS Entidade, type(r) AS Tipo, related.id AS Destino LIMIT 10
                     """, params={"cid": cid})
                     rels_str = "; ".join([f"({x['Entidade']} {x['Tipo']} {x['Destino']})" for x in relacoes]) if relacoes else "Sem conexões extras."
                 except:
@@ -119,14 +132,13 @@ def startup_event():
         )
 
         # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
-        # Removido o argumento de mensagem de sistema daqui para evitar erro de inicialização
         agente_ppgi = create_react_agent(
             model=llm_agente, 
             tools=[hybrid_normative_search], 
             checkpointer=memoria_agente
         )
 
-        logging.info("🚀 Agente UTFPResponde V19 (GCS-Private) pronto para uso.")
+        logging.info("🚀 Agente UTFPResponde V23 (Híbrido + Expansão Semântica) pronto para uso no Cloud Run.")
 
     except Exception as e:
         logging.error(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO: {str(e)}")
@@ -138,13 +150,12 @@ async def chat_endpoint(request: QueryRequest):
     
     try:
         config = {"configurable": {"thread_id": request.session_id}}
-        prompt_expandido = f"{request.query} (Focar em: Programa do PPGI UTFPR)"
         
-        # Injetando as regras do sistema dinamicamente na invocação
+        # Injetando as diretrizes de sistema dinamicamente na invocação junto com a query
         response = agente_ppgi.invoke(
             {"messages": [
                 SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=prompt_expandido)
+                HumanMessage(content=request.query)
             ]},
             config=config
         )
