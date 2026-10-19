@@ -52,7 +52,7 @@ SYSTEM_PROMPT = (
 )
 
 def inicializar_motor_ia():
-    """Lazy load: inicializa os recursos pesados apenas na primeira chamada para passar no health check do Cloud Run."""
+    """Lazy load seguro para passar no health check do Cloud Run."""
     global vector_db, graph_db, agente_ppgi
     if agente_ppgi is not None:
         return
@@ -197,11 +197,11 @@ def inicializar_motor_ia():
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "service": "UTFPResponde API"}
+    """Rota raiz obrigatória para atender ao probe de saúde do Cloud Run instantaneamente."""
+    return {"status": "healthy", "service": "UTFPResponde API V23"}
 
 @app.post("/chat", response_model=QueryResponse)
 async def chat_endpoint(request: QueryRequest):
-    # Inicializa o motor sob demanda na primeira requisição, liberando a porta 8080 imediatamente no boot
     try:
         inicializar_motor_ia()
     except Exception as e:
