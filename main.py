@@ -85,11 +85,17 @@ def inicializar_motor_ia():
             persist_path=LOCAL_PATH
         )
 
-        graph_db = Neo4jGraph(
-            url=os.environ.get("NEO4J_URI"),
-            username=os.environ.get("NEO4J_USERNAME"),
-            password=os.environ.get("NEO4J_PASSWORD")
-        )
+        # Inicialização blindada do Neo4j para evitar falhas críticas se faltarem credenciais
+        try:
+            graph_db = Neo4jGraph(
+                url=os.environ.get("NEO4J_URI", ""),
+                username=os.environ.get("NEO4J_USERNAME", ""),
+                password=os.environ.get("NEO4J_PASSWORD", "")
+            )
+            logging.info("✅ Conexão com o Neo4j estabelecida com sucesso.")
+        except Exception as neo_err:
+            logging.warning(⚠️ f"Aviso: Neo4j indisponível na inicialização: {neo_err}. Operando em modo de fallback vetorial puro.")
+            graph_db = None
 
         @tool
         def hybrid_normative_search(pergunta: str) -> str:
@@ -147,21 +153,23 @@ def inicializar_motor_ia():
                 texto_base = d.page_content
                 fonte = d.metadata.get("source", "Documento PPGI")
 
-                try:
-                    relacoes = graph_db.query("""
-                        MATCH (c:Chunk {id: $cid})-[:MENTIONS]->(e)
-                        OPTIONAL MATCH (e)-[r]-(related)
-                        RETURN e.id AS Entidade, type(r) AS Relacao, related.id AS Destino LIMIT 15
-                    """, params={"cid": cid})
-                    rels_lista = []
-                    for x in relacoes:
-                        if x.get('Relacao') and x.get('Destino'):
-                            rels_lista.append(f"({x['Entidade']} -> {x['Relacao']} -> {x['Destino']})")
-                        else:
-                            rels_lista.append(f"({x['Entidade']} -> MENTIONS -> {fonte})")
-                    rels_str = ", ".join(rels_lista) if rels_lista else "Nenhuma relação extra."
-                except Exception:
-                    rels_str = "Nenhuma relação extra."
+                rels_str = "Nenhuma relação extra."
+                if graph_db:
+                    try:
+                        relacoes = graph_db.query("""
+                            MATCH (c:Chunk {id: $cid})-[:MENTIONS]->(e)
+                            OPTIONAL MATCH (e)-[r]-(related)
+                            RETURN e.id AS Entidade, type(r) AS Relacao, related.id AS Destino LIMIT 15
+                        """, params={"cid": cid})
+                        rels_lista = []
+                        for x in relacoes:
+                            if x.get('Relacao') and x.get('Destino'):
+                                rels_lista.append(f"({x['Entidade']} -> {x['Relacao']} -> {x['Destino']})")
+                            else:
+                                rels_lista.append(f"({x['Entidade']} -> MENTIONS -> {fonte})")
+                        rels_str = ", ".join(rels_lista) if rels_lista else "Nenhuma relação extra."
+                    except Exception:
+                        rels_str = "Nenhuma relação extra."
 
                 contexto_agregado.append(f"📄 FONTE: {fonte}\n📝 TEXTO: {texto_base}\n🔗 REGRAS CONECTADAS (MENTIONS): {rels_str}")
 
