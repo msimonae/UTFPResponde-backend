@@ -16,7 +16,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "UTFPResponde-Compliance-V23"
 os.environ["OPENROUTER_BASE_URL"] = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-# Garante que OPENAI_API_KEY esteja espelhada com OPENROUTER_API_KEY (igual ao Colab)
 if os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.environ.get("OPENROUTER_API_KEY")
 
@@ -39,7 +38,6 @@ graph_db = None
 agente_ppgi = None
 memoria_agente = MemorySaver()
 
-# Diretrizes idênticas às validadas na Célula 7 do Colab
 SYSTEM_PROMPT = (
     "Você é o Assistente Virtual UTFPResponde, especializado EXCLUSIVAMENTE em normas acadêmicas e tutoriais operacionais do PPGI-UTFPR.\n\n"
     "DIRETRIZES DE RIGOR INSTITUCIONAL E CONTEXTO IMPLÍCITO:\n"
@@ -50,33 +48,32 @@ SYSTEM_PROMPT = (
     "ou se a informação realmente não existir nos documentos recuperados, inicie OBRIGATORIAMENTE sua resposta com a frase exata: "
     "\"Não encontrei informações específicas sobre essa questão nas normas vigentes do PPGI-UTFPR.\" "
     "e oriente o usuário a consultar diretamente a coordenação do programa, SEM inventar resoluções.\n"
-    "4. TRACEABILITY (RASTREABILIDADE): Sempre que a resposta constar nos fragmentos recuperados, cite explicitamente o documento ou resolução de origem "
-    "(ex: \"Segundo a Resolução PPGI-CP/UTFPR nº 008/2021...\", \"Fonte: nome_do_arquivo.pdf\")."
+    "4. TRACEABILITY (RASTREABILIDADE): Sempre que a resposta constar nos fragmentos recuperados, cite explicitamente o documento ou resolução de origem."
 )
 
-@app.on_event("startup")
-def startup_event():
+def inicializar_motor_ia():
+    """Lazy load: inicializa os recursos pesados apenas na primeira chamada para passar no health check do Cloud Run."""
     global vector_db, graph_db, agente_ppgi
+    if agente_ppgi is not None:
+        return
 
-    logging.info("⏳ Iniciando o provisionamento da infraestrutura de IA do PPGI (Versão 23 Sincronizada com Colab)...")
-
+    logging.info("⏳ Inicializando infraestrutura de IA sob demanda (Lazy Load)...")
     try:
         api_key_ativa = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
         os.environ["OPENAI_API_KEY"] = api_key_ativa or ""
 
-        # --- 1. DOWNLOAD SEGURO DO GOOGLE CLOUD STORAGE ---
         BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "utfpresponde-vectordb-data")
         BLOB_NAME = "sklearn_index_ppgi.parquet"
         LOCAL_PATH = "/tmp/sklearn_index_ppgi.parquet"
 
-        logging.info(f"📥 Acessando bucket: {BUCKET_NAME}")
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(BUCKET_NAME)
-        blob = bucket.blob(BLOB_NAME)
-        blob.download_to_filename(LOCAL_PATH)
-        logging.info("✅ Base vetorial carregada com sucesso do GCS para o ambiente local.")
+        if not os.path.exists(LOCAL_PATH):
+            logging.info(f"📥 Baixando base vetorial do bucket GCS: {BUCKET_NAME}")
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(BUCKET_NAME)
+            blob = bucket.blob(BLOB_NAME)
+            blob.download_to_filename(LOCAL_PATH)
+            logging.info("✅ Base vetorial baixada para /tmp.")
 
-        # --- 2. CONFIGURAÇÃO DE EMBEDDINGS E VECTOR STORE ---
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-small",
             openai_api_base=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
@@ -88,23 +85,18 @@ def startup_event():
             persist_path=LOCAL_PATH
         )
 
-        # --- 3. CONEXÃO COM O KNOWLEDGE GRAPH (NEO4J) ---
         graph_db = Neo4jGraph(
             url=os.environ.get("NEO4J_URI"),
             username=os.environ.get("NEO4J_USERNAME"),
             password=os.environ.get("NEO4J_PASSWORD")
         )
 
-        # --- 4. DEFINIÇÃO DA FERRAMENTA DE BUSCA HÍBRIDA (100% IDÊNTICA AO COLAB) ---
         @tool
         def hybrid_normative_search(pergunta: str) -> str:
-            """Ferramenta OBRIGATÓRIA para buscar regras, resoluções e tutoriais do PPGI-UTFPR.
-            Consulta o banco vetorial e expande a busca no grafo Neo4j via Hash MD5."""
-
+            """Ferramenta OBRIGATÓRIA para buscar regras, resoluções e tutoriais do PPGI-UTFPR."""
             query_expandida = pergunta
             p_low = pergunta.lower()
 
-            # Expansão semântica + Contextos Estruturados idênticos à Célula 7 do Colab (Corrige Q08, Q09, Q24 e Q38)
             contextos_fallback = []
 
             if "inpi" in p_low or "agint" in p_low or "software" in p_low:
@@ -146,8 +138,7 @@ def startup_event():
 
             try:
                 docs = vector_db.similarity_search(query_expandida, k=6)
-            except Exception as e:
-                logging.warning(f"Aviso na busca vetorial: {e}")
+            except Exception:
                 docs = []
 
             contexto_agregado = list(contextos_fallback)
@@ -176,7 +167,6 @@ def startup_event():
 
             return "\n\n".join(contexto_agregado)
 
-        # --- 5. CONFIGURAÇÃO DO MODELO ---
         llm_agente = ChatOpenAI(
             model="openai/gpt-4o-mini",
             temperature=0,
@@ -186,8 +176,6 @@ def startup_event():
             openai_api_key=api_key_ativa
         )
 
-        # --- 6. CRIAÇÃO DO AGENTE (LANGGRAPH) ---
-        # Tenta inicializar com prompt nativo (LangGraph >= 0.2.20); se for versão anterior (0.2.16), faz fallback limpo
         try:
             agente_ppgi = create_react_agent(
                 model=llm_agente,
@@ -202,20 +190,28 @@ def startup_event():
                 checkpointer=memoria_agente
             )
 
-        logging.info("🚀 Agente UTFPResponde V23 (100% Sincronizado com o Colab) pronto para uso no Cloud Run.")
-
+        logging.info("🚀 Agente UTFPResponde V23 inicializado com sucesso via Lazy Load.")
     except Exception as e:
-        logging.error(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO: {str(e)}")
+        logging.error(f"❌ Erro ao inicializar motor de IA: {e}")
+        raise e
+
+@app.get("/")
+def health_check():
+    return {"status": "ok", "service": "UTFPResponde API"}
 
 @app.post("/chat", response_model=QueryResponse)
 async def chat_endpoint(request: QueryRequest):
+    # Inicializa o motor sob demanda na primeira requisição, liberando a porta 8080 imediatamente no boot
+    try:
+        inicializar_motor_ia()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na inicialização da IA: {str(e)}")
+
     if not agente_ppgi:
-        raise HTTPException(status_code=500, detail="O motor de IA não pôde ser inicializado. Verifique os logs do Cloud Run.")
+        raise HTTPException(status_code=500, detail="O motor de IA não pôde ser inicializado.")
 
     try:
         config = {"configurable": {"thread_id": request.session_id}, "recursion_limit": 10}
-
-        # Expansão de ancoragem idêntica à Célula 7 do Colab
         prompt_expandido = f"{request.query} (Contexto obrigatório para a busca: Programa do PPGI UTFPR)"
 
         response = agente_ppgi.invoke(
